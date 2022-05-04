@@ -1,7 +1,7 @@
-setwd("C:/Marius Tita/OLD/marius/backup 27.11.2007/my doc/Directia administr. riscuri/Analize Risc/Web Plafon R/Risk applications/IFRS_9/2021_IFRS9/Model Nou")
+#setwd("C:/Marius Tita/OLD/marius/backup 27.11.2007/my doc/Directia administr. riscuri/Analize Risc/Web Plafon R/Risk applications/IFRS_9/2021_IFRS9/Model Nou")
 library(magrittr)
 library(glmnet)
-library(tidymodels)
+
 
 set.seed(2022)
 
@@ -50,9 +50,9 @@ baza_updated <- baza_updated %>% dplyr::left_join(y = baza_updated %>%
 
 baza_1Y_CRC <- baza_updated %>% dplyr::filter( data_raport <= as.Date("2020-12-31"),
         !is.na(scor_serv_datorie),!categorie_contaminata %in% c("insolventa", "cerere_plata")) %>%
-  dplyr::select(3:13,15:19,24:27) %>% 
-  rsample::initial_split(prop = 0.70, strata = Default_1Y)
+            rsample::initial_split(prop = 0.70, strata = Default_1Y)
 
+#readr::write_csv(x = rsample::training(baza_1Y_CRC), "Updated new model/train_1Y_CRC.csv")
 
 
 glm_spec_new_model_1Y_CRC <- parsnip::logistic_reg(penalty = tune::tune(), mixture = 1) %>% 
@@ -61,7 +61,8 @@ glm_spec_new_model_1Y_CRC <- parsnip::logistic_reg(penalty = tune::tune(), mixtu
 
 
 
-glm_recipe_new_model_1Y_CRC <- recipe(formula = Default_1Y ~ ., data = rsample::training(baza_1Y_CRC)) %>%
+glm_recipe_new_model_1Y_CRC <- recipes::recipe(formula = Default_1Y ~ ., data = rsample::training(baza_1Y_CRC) %>%
+                                        dplyr::select(3:13,15:19,24:27)) %>%
   embed::step_woe(role = "predictor",outcome = "Default_1Y",prefix = "woe_1Y",categorie_contaminata) %>%
   recipes::step_rm(data_raport,A_fost_interdictie, new_are_restante_peste_30_zile_6M,new_Este_in_interdictie_6M,
                    total_incidente_majore,A_fost_interdictie,scor_serv_prel, 
@@ -72,12 +73,13 @@ glm_recipe_new_model_1Y_CRC <- recipe(formula = Default_1Y ~ ., data = rsample::
                    "Variatie_PIB1an_next_1Y_last_1Y") 
 
 # View data after transformation with the above recipe
-bake(prep( glm_recipe_new_model_1Y_CRC,training = rsample::training(baza_1Y_CRC) %>% 
+recipes::bake( recipes::prep( glm_recipe_new_model_1Y_CRC,training = rsample::training(baza_1Y_CRC) %>% 
              dplyr::mutate(Default_1Y=as.factor(Default_1Y))),new_data = rsample::training(baza_1Y_CRC) %>% 
        dplyr::mutate(Default_1Y=as.factor(Default_1Y))) %>% dplyr::group_by(woe_1Y_categorie_contaminata) %>%
   dplyr::summarise(dplyr::n())
 
-glm_workflow_new_model_1Y_CRC <- workflow() %>% add_recipe(glm_recipe_new_model_1Y_CRC) %>% add_model(glm_spec_new_model_1Y_CRC)
+glm_workflow_new_model_1Y_CRC <- workflows::workflow() %>% workflows::add_recipe(glm_recipe_new_model_1Y_CRC) %>% 
+        workflows::add_model(glm_spec_new_model_1Y_CRC)
 
 
 glm_initial_fit_1Y_CRC <- parsnip::fit(object = glm_workflow_new_model_1Y_CRC, data = rsample::training(baza_1Y_CRC) %>%
@@ -96,20 +98,21 @@ broom::tidy( glm_initial_fit_1Y_CRC,penalty=0.004)
 #select_best(tune_res_new_model_1Y_CRC, metric = "roc_auc")
 #collect_metrics(x = tune_res_new_model_1Y_CRC) %>% dplyr::filter(.metric=="roc_auc") %>% dplyr::arrange(desc(mean)) %>% View()
 
-glm_final_workflow_new_model_1Y_CRC <- finalize_workflow(x = glm_workflow_new_model_1Y_CRC,
-                                                         parameters = data.frame(penalty=0.004))
+glm_final_workflow_new_model_1Y_CRC <- tune::finalize_workflow( x = glm_workflow_new_model_1Y_CRC,
+                                              parameters = data.frame(penalty=0.004))
+
 #select_best(tune_res_new_model_1Y, metric = "roc_auc")) 
 
-glm_final_fit_1Y_CRC <- parsnip::fit(object = glm_final_workflow_new_model_1Y_CRC,data = training(baza_1Y_CRC) %>%
+glm_final_fit_1Y_CRC <- parsnip::fit(object = glm_final_workflow_new_model_1Y_CRC,data = rsample::training(baza_1Y_CRC) %>%
                                        dplyr::mutate(Default_1Y = as.factor(Default_1Y)) )
 
 
-pROC::auc(predictor = augment(x = glm_final_fit_1Y_CRC,new_data = testing(baza_1Y_CRC)) %>% dplyr::pull(.pred_1),
-          response = testing(baza_1Y_CRC) %>% dplyr::pull(Default_1Y))
+pROC::auc(predictor = broom::augment(x = glm_final_fit_1Y_CRC,new_data = rsample::training(baza_1Y_CRC)) %>% dplyr::pull(.pred_1),
+          response = rsample::training(baza_1Y_CRC) %>% dplyr::pull(Default_1Y))
 
 temp_1Y_CRC <- baza_updated %>% dplyr::filter(data_raport <= as.Date("2018-12-31"),!is.na(scor_serv_datorie),
                                               !categorie_contaminata %in% c("insolventa","cerere_plata"))
-temp_1Y_CRC <- temp_1Y_CRC %>%  dplyr::mutate(prob_1Y_CRC = augment(x = glm_final_fit_1Y_CRC, 
+temp_1Y_CRC <- temp_1Y_CRC %>%  dplyr::mutate(prob_1Y_CRC = broom::augment(x = glm_final_fit_1Y_CRC, 
                                                                     new_data = temp_1Y_CRC) %>%    dplyr::pull(.pred_1))
 
 View(temp_1Y_CRC %>% dplyr::group_by(round(prob_1Y_CRC,3)) %>% dplyr::summarise(Default_3Y = mean(Default_3Y),
@@ -119,15 +122,20 @@ threshold_1Y_CRC <- 0.033
 
 rm("temp_1Y_CRC")
 
-baza_updated <- baza_updated %>% dplyr::mutate(prob_1Y_CRC = augment(x = glm_final_fit_1Y_CRC, 
+baza_updated <- baza_updated %>% dplyr::mutate(prob_1Y_CRC =  broom::augment(x = glm_final_fit_1Y_CRC, 
                      new_data = baza_updated) %>%    dplyr::pull(.pred_1)) 
+
+#saveRDS(object = glm_final_fit_1Y_CRC,file = "Updated new model/model_1Y_crc.rds")
+
 
 ##############################  DEVELOP 1Y NO crc   ###############################
 
 
 baza_1Y_NO_crc <- baza_updated %>% dplyr::filter(data_raport <= as.Date("2020-12-31"),is.na(scor_serv_datorie),
-     !categorie_contaminata %in% c("insolventa","cerere_plata")) %>%  dplyr::select(9:11,13,15:19) %>% 
+     !categorie_contaminata %in% c("insolventa","cerere_plata")) %>%   
   rsample::initial_split(prop = 0.7,strata = Default_1Y)
+
+#readr::write_csv(x = rsample::training(baza_1Y_NO_crc), "Updated new model/train_1Y_NO_crc.csv")
 
 
 glm_spec_new_model_1Y_NO_crc <- parsnip::logistic_reg(penalty = tune::tune(), mixture = 1) %>% 
@@ -136,9 +144,10 @@ glm_spec_new_model_1Y_NO_crc <- parsnip::logistic_reg(penalty = tune::tune(), mi
 
 
 
-glm_recipe_new_model_1Y_NO_crc <- recipe(formula = Default_1Y ~ ., data = rsample::training(baza_1Y_NO_crc)) %>%
+glm_recipe_new_model_1Y_NO_crc <- recipes::recipe(formula = Default_1Y ~ ., data = rsample::training(baza_1Y_NO_crc) %>% 
+                                           dplyr::select(9:11,13,15:19)) %>%
   #embed::step_woe(role = "predictor",outcome = "Default_1Y",prefix = "woe_1Y", categorie_contaminata) %>%
-  step_mutate(role = "predictor", woe_1Y_categorie_contaminata = 
+  recipes::step_mutate(role = "predictor", woe_1Y_categorie_contaminata = 
                 ifelse(categorie_contaminata == "standard",0.373,
                        ifelse(categorie_contaminata=="instiintare_neplata",-2.48,NA_real_))) %>%
   recipes::step_rm(data_raport,categorie_contaminata,
@@ -146,14 +155,15 @@ glm_recipe_new_model_1Y_NO_crc <- recipe(formula = Default_1Y ~ ., data = rsampl
                    Variatie_Robor3M_next_1Y_last_1Y,`Crestere 1Y next year`, # not relevant or relevance too small
                    "Raport Crestere next year last year") # "wrong sign
 
-bake(prep( glm_recipe_new_model_1Y_NO_crc,training = rsample::training(baza_1Y_NO_crc) %>% 
+# View encoding of categorie_contaminata
+recipes::bake( recipes::prep( glm_recipe_new_model_1Y_NO_crc,training = rsample::training(baza_1Y_NO_crc) %>% 
              dplyr::mutate(Default_1Y=as.factor(Default_1Y))),new_data = rsample::training(baza_1Y_NO_crc) %>% 
        dplyr::mutate(Default_1Y=as.factor(Default_1Y))) %>% dplyr::group_by(woe_1Y_categorie_contaminata) %>%
   dplyr::summarise(dplyr::n())
 
 
-glm_workflow_new_model_1Y_NO_crc <- workflow() %>% add_recipe(glm_recipe_new_model_1Y_NO_crc) %>% 
-  add_model(glm_spec_new_model_1Y_NO_crc)
+glm_workflow_new_model_1Y_NO_crc <- workflows::workflow() %>% workflows::add_recipe(glm_recipe_new_model_1Y_NO_crc) %>% 
+  workflows::add_model(glm_spec_new_model_1Y_NO_crc)
 
 
 glm_initial_fit_1Y_NO_crc <- parsnip::fit(object = glm_workflow_new_model_1Y_NO_crc, data = rsample::training(baza_1Y_NO_crc) %>%
@@ -162,46 +172,46 @@ glm_initial_fit_1Y_NO_crc <- parsnip::fit(object = glm_workflow_new_model_1Y_NO_
 # 0 is the best penalty
 broom::tidy( glm_initial_fit_1Y_NO_crc,penalty=0.0)
 
-penalty_grid_new_model_1Y_NO_crc <- tibble::tibble(penalty = seq(from = 0, to=0.04, by=0.001))
+#penalty_grid_new_model_1Y_NO_crc <- tibble::tibble(penalty = seq(from = 0, to=0.04, by=0.001))
 
-tune_res_new_model_1Y_NO_crc <- tune::tune_grid(object = glm_workflow_new_model_1Y_NO_crc,grid = penalty_grid_new_model_1Y_NO_crc, 
-   resamples = rsample::training(baza_1Y_NO_crc) %>%  dplyr::mutate(Default_1Y = as.factor(Default_1Y)) %>% 
-    rsample::vfold_cv(v = 10))
+#tune_res_new_model_1Y_NO_crc <- tune::tune_grid(object = glm_workflow_new_model_1Y_NO_crc,grid = penalty_grid_new_model_1Y_NO_crc, 
+ #  resamples = rsample::training(baza_1Y_NO_crc) %>%  dplyr::mutate(Default_1Y = as.factor(Default_1Y)) %>% 
+  #  rsample::vfold_cv(v = 10))
 
 #autoplot(tune_res_new_model_1Y_NO_crc)
 #select_best(tune_res_new_model_1Y_NO_crc, metric = "roc_auc")
-collect_metrics(x = tune_res_new_model_1Y_NO_crc) %>% dplyr::filter(.metric=="roc_auc") %>% dplyr::arrange(desc(mean)) %>% View()
 
-glm_final_workflow_new_model_1Y_NO_crc <- finalize_workflow(x = glm_workflow_new_model_1Y_NO_crc,
+#collect_metrics(x = tune_res_new_model_1Y_NO_crc) %>% dplyr::filter(.metric=="roc_auc") %>% dplyr::arrange(desc(mean)) %>% View()
+
+glm_final_workflow_new_model_1Y_NO_crc <- tune::finalize_workflow(x = glm_workflow_new_model_1Y_NO_crc,
                                                             parameters = data.frame(penalty=0.00))
  
 
-glm_final_fit_1Y_NO_crc <- parsnip::fit(object = glm_final_workflow_new_model_1Y_NO_crc,data = training(baza_1Y_NO_crc) %>%
+glm_final_fit_1Y_NO_crc <- parsnip::fit(object = glm_final_workflow_new_model_1Y_NO_crc,data = rsample::training(baza_1Y_NO_crc) %>%
                                           dplyr::mutate(Default_1Y = as.factor(Default_1Y)) )
 
 
+# Get global auc  for training/testing of model_1Y_NO_crc
+pROC::auc(predictor = broom::augment(x = glm_final_fit_1Y_NO_crc,new_data = rsample::training(baza_1Y_NO_crc)) %>% dplyr::pull(.pred_1),
+          response = rsample::training(baza_1Y_NO_crc) %>% dplyr::pull(Default_1Y))
 
-pROC::auc(predictor = augment(x = glm_final_fit_1Y_NO_crc,new_data = testing(baza_1Y_NO_crc)) %>% dplyr::pull(.pred_1),
-          response = testing(baza_1Y_NO_crc) %>% dplyr::pull(Default_1Y))
-
-# View for detecting stage2 threshold
+# View for visual detecting of global stage2 threshold for NO_crc
 
 temp_1Y_NO_crc <- baza_updated %>% dplyr::filter(data_raport <= as.Date("2018-12-31"),is.na(scor_serv_datorie),
                                                  !categorie_contaminata %in% c("insolventa","cerere_plata"))
-temp_1Y_NO_crc <- temp_1Y_NO_crc %>%  dplyr::mutate(prob_1Y_NO_crc = augment(x = glm_final_fit_1Y_NO_crc, 
+temp_1Y_NO_crc <- temp_1Y_NO_crc %>%  dplyr::mutate(prob_1Y_NO_crc = broom::augment(x = glm_final_fit_1Y_NO_crc, 
              new_data = temp_1Y_NO_crc) %>%    dplyr::pull(.pred_1))
 
 
 View(temp_1Y_NO_crc %>% #dplyr::mutate(group_col = ifelse(prob_1Y_NO_crc<0.1,"Under threshold%","Unde threshold")) %>%
        dplyr::group_by(group_col = round(prob_1Y_NO_crc,2)) %>%
-       dplyr::group_by(group_col) %>% dplyr::summarise(Default_3Y = mean(Default_3Y),
-                                                       Nr_beneficiari = dplyr::n())) 
+       dplyr::group_by(group_col) %>% dplyr::summarise(Default_3Y = mean(Default_3Y),Nr_beneficiari = dplyr::n())) 
 
-threshold_1Y_NO_crc <- 0.10
+threshold_1Y_NO_crc <- 0.11
 
 rm("temp_1Y_NO_crc")
 
-baza_updated <- baza_updated %>% dplyr::mutate(prob_1Y_NO_crc = augment(x = glm_final_fit_1Y_NO_crc, 
+baza_updated <- baza_updated %>% dplyr::mutate(prob_1Y_NO_crc = broom::augment(x = glm_final_fit_1Y_NO_crc, 
                           new_data = baza_updated) %>%    dplyr::pull(.pred_1)) 
 
 
@@ -210,45 +220,53 @@ baza_updated <- baza_updated %>% dplyr::mutate(stage = ifelse(
   ifelse( !is.na(scor_serv_datorie) & prob_1Y_CRC > threshold_1Y_CRC,  "stage2",
           ifelse( is.na(scor_serv_datorie) &  prob_1Y_NO_crc > threshold_1Y_NO_crc,  "stage2",
                   "stage1") ) ))
+
+saveRDS(object = glm_final_fit_1Y_NO_crc,file = "Updated new model/model_1Y_NO_crc.rds")
+
+
 ########################### DEVELOP 3Y CRC  ##########################################
 
 baza_3Y_CRC <- baza_updated %>% dplyr::filter( stage == "stage2",
                     data_raport <= as.Date("2018-12-31"),!is.na(scor_serv_datorie),
                     !categorie_contaminata %in% c("insolventa", "cerere_plata")) %>%
-  dplyr::select(3:12, 14:19,24:27) %>%  rsample::initial_split(prop = 0.7, strata = Default_3Y)
+                        rsample::initial_split(prop = 0.7, strata = Default_3Y)
 
+# Save training data for 3Y_CRC
+#readr::write_csv(x = rsample::training(baza_3Y_CRC), "Updated new model/train_3Y_CRC.csv")
 
 glm_spec_new_model_3Y_CRC <- parsnip::logistic_reg(penalty = tune::tune(), mixture = 1) %>%
   parsnip::set_engine(engine = "glmnet") %>%
   parsnip::set_mode(mode = "classification")
 
 
-glm_recipe_new_model_3Y_CRC <- recipe(formula = Default_3Y ~ ., data = rsample::training(baza_3Y_CRC)) %>%
+glm_recipe_new_model_3Y_CRC <- recipes::recipe(formula = Default_3Y ~ ., data = rsample::training(baza_3Y_CRC) %>% 
+                                        dplyr::select(3:12, 14:19,24:27)        ) %>%
   embed::step_woe(role = "predictor",outcome = 'Default_3Y',trained = FALSE, categorie_contaminata,
                   prefix = "woe_3Y") %>%
   recipes::step_rm(data_raport,scor_serv_prel, 
-                   total_incidente_majore,A_fost_interdictie,  # these variables are never relevant fir regression
+                   total_incidente_majore,A_fost_interdictie,  # these variables are never relevant for regression
                    total_incidente, new_are_restante_peste_30_zile_6M, # are not selected by the best penalty
                    "Raport Crestere next year last year",Variatie_Robor3M_next_1Y_last_1Y,Variatie_PIB1an_next_1Y_last_1Y,
                    Variatie_Robor3M_next_1Y_last_1Y,Variatie_PIB1an_next_1Y_last_1Y)
 
-#View processed data frame
-bake(object = prep(x = glm_recipe_new_model_3Y_CRC,training = training(baza_3Y_CRC) %>%
-                     dplyr::mutate(Default_3Y = as.factor(Default_3Y))) ,new_data =  training(baza_3Y_CRC) %>%
+#View encoding categorie contaminata 3Y
+recipes::bake( object = recipes::prep(x = glm_recipe_new_model_3Y_CRC,training = rsample::training(baza_3Y_CRC) %>%
+                     dplyr::mutate(Default_3Y = as.factor(Default_3Y))) ,new_data =  rsample::training(baza_3Y_CRC) %>%
        dplyr::mutate(Default_3Y = as.factor(Default_3Y)) ) %>% 
   dplyr::group_by(woe_3Y_categorie_contaminata) %>% dplyr::summarise(dplyr::n())
 
 
 
 
-glm_workflow_new_model_3Y_CRC <- workflow() %>% add_recipe(glm_recipe_new_model_3Y_CRC) %>% add_model(glm_spec_new_model_3Y_CRC)
+glm_workflow_new_model_3Y_CRC <- workflows::workflow() %>% workflows::add_recipe(glm_recipe_new_model_3Y_CRC) %>% 
+    workflows::add_model(glm_spec_new_model_3Y_CRC)
 
 
 glm_initial_fit_3Y_CRC <- parsnip::fit(object = glm_workflow_new_model_3Y_CRC, data = rsample::training(baza_3Y_CRC) %>%
                                          dplyr::mutate(Default_3Y = as.factor(Default_3Y)))
 
-# 0.001 is the best penalty
-broom::tidy( glm_initial_fit_3Y_CRC,penalty=0.001)
+# 0.00 is the best penalty
+broom::tidy( glm_initial_fit_3Y_CRC,penalty=0.00)
 
 penalty_grid_new_model_3Y_CRC <- tibble::tibble(penalty = seq(from = 0, to=0.08, by=0.001))
 
@@ -260,32 +278,36 @@ collect_metrics(x = tune_res_new_model_3Y_CRC) %>% dplyr::filter(.metric=="roc_a
 
 
 glm_final_workflow_new_model_3Y_CRC <- finalize_workflow(x = glm_workflow_new_model_3Y_CRC,
-                                                         parameters = data.frame(penalty=0.001))
+                                                         parameters = data.frame(penalty=0.000))
 
 
 glm_final_fit_3Y_CRC <- parsnip::fit(object = glm_final_workflow_new_model_3Y_CRC,data = training(baza_3Y_CRC) %>%
                                        dplyr::mutate(Default_3Y = as.factor(Default_3Y)) )
 
 
-pROC::auc(predictor = augment(x = glm_final_fit_3Y_CRC,new_data = testing(baza_3Y_CRC)) %>% dplyr::pull(.pred_1),
-          response = testing(baza_3Y_CRC) %>% dplyr::pull(Default_3Y))
+pROC::auc(predictor = augment(x = glm_final_fit_3Y_CRC,new_data = rsample::testing(baza_3Y_CRC)) %>% dplyr::pull(.pred_1),
+          response = rsample::testing(baza_3Y_CRC) %>% dplyr::pull(Default_3Y))
 
 
 baza_updated <- baza_updated %>% dplyr::mutate(prob_3Y_CRC = augment(x = glm_final_fit_3Y_CRC, 
                               new_data = baza_updated) %>%    dplyr::pull(.pred_1))
 
+#saveRDS(object = glm_final_fit_3Y_CRC,file = "Updated new model/model_3Y_CRC.rds")
+
 ######################################## DEVELOP 3Y NO crc ############################################
 
 baza_3Y_NO_crc <- baza_updated %>% dplyr::filter( stage == "stage2",data_raport <= as.Date("2018-12-31"),
             is.na(scor_serv_datorie),!categorie_contaminata %in% c("insolventa", "cerere_plata") ) %>%
-  dplyr::select(9:11,14:19) %>%  rsample::initial_split(prop = 0.7, strata = Default_3Y)
+     rsample::initial_split(prop = 0.7, strata = Default_3Y)
+
 
 glm_spec_new_model_3Y_NO_crc <- parsnip::logistic_reg( penalty = tune::tune(), mixture = 1) %>% 
   parsnip::set_engine(engine = "glmnet") %>%
   parsnip::set_mode(mode = "classification")
 
 
-glm_recipe_new_model_3Y_NO_crc <- recipe(formula = Default_3Y ~ ., data = rsample::training(baza_3Y_NO_crc)) %>%
+glm_recipe_new_model_3Y_NO_crc <- recipes::recipe(formula = Default_3Y ~ ., data = rsample::training(baza_3Y_NO_crc) %>% 
+                                           dplyr::select(9:11,14:19)) %>%
   # categorie_contaminata is no longer a predictor here as almost all observations are instiintare_neplata
   #embed::step_woe(role = "predictor",outcome = "Default_3Y",prefix = "woe_3Y", categorie_contaminata) %>%
   #step_mutate(woe_3Y_categorie_contaminata = ifelse( categorie_contaminata=="standard",0.188,ifelse(
@@ -296,14 +318,14 @@ glm_recipe_new_model_3Y_NO_crc <- recipe(formula = Default_3Y ~ ., data = rsampl
 
 
 
-glm_workflow_new_model_3Y_NO_crc <- workflow() %>% add_recipe(glm_recipe_new_model_3Y_NO_crc) %>% 
-  add_model(glm_spec_new_model_3Y_NO_crc)
+glm_workflow_new_model_3Y_NO_crc <- workflows::workflow() %>% workflows::add_recipe(glm_recipe_new_model_3Y_NO_crc) %>% 
+  workflows::add_model(glm_spec_new_model_3Y_NO_crc)
 
 glm_initial_fit_3Y_NO_crc <-  parsnip::fit( object = glm_workflow_new_model_3Y_NO_crc,
                     data = rsample::training(baza_3Y_NO_crc) %>% dplyr::mutate(Default_3Y = as.factor(Default_3Y)) )
 
-# Penalty 0.0 is the best penalty
-broom::tidy( glm_initial_fit_3Y_NO_crc,penalty=0.01)
+# Penalty 0.044 is the best penalty
+broom::tidy( glm_initial_fit_3Y_NO_crc,penalty=0.0)
 
 penalty_grid_new_model_3Y_NO_crc <- tibble::tibble(penalty = seq(from = 0, to=0.05, by=0.001))
 
@@ -314,22 +336,28 @@ tune_res_new_model_3Y_NO_crc <- tune::tune_grid(object = glm_workflow_new_model_
 collect_metrics(x = tune_res_new_model_3Y_NO_crc) %>% dplyr::filter(.metric=="roc_auc") %>% 
   dplyr::arrange(desc(mean)) %>% View()
 
-# Best penalty is 0.017
+
 glm_final_workflow_new_model_3Y_NO_crc <- finalize_workflow(x = glm_workflow_new_model_3Y_NO_crc,
-                                                            parameters = data.frame(penalty=0.01))
+                                                            parameters = data.frame(penalty=0.044))
 
 
 glm_final_fit_3Y_NO_crc <- parsnip::fit(object = glm_final_workflow_new_model_3Y_NO_crc,data = training(baza_3Y_NO_crc) %>%
                                           dplyr::mutate(Default_3Y = as.factor(Default_3Y)) )
 
-pROC::auc(predictor = augment(x = glm_final_fit_3Y_NO_crc,new_data = testing(baza_3Y_NO_crc)) %>% dplyr::pull(.pred_1),
-          response = testing(baza_3Y_NO_crc) %>% dplyr::pull(Default_3Y))
+pROC::auc(predictor = augment(x = glm_final_fit_3Y_NO_crc,new_data = training(baza_3Y_NO_crc)) %>% dplyr::pull(.pred_1),
+          response = training(baza_3Y_NO_crc) %>% dplyr::pull(Default_3Y))
 
-#saveRDS(object = glm_final_fit_1Y_NO_crc,file = "new_model_3Y_NO_crc.rds")
+
 
 baza_updated <- baza_updated %>% dplyr::mutate(prob_3Y_NO_crc = augment(x = glm_final_fit_3Y_NO_crc,
                     new_data = baza_updated) %>%    dplyr::pull(.pred_1) )
 
+
+saveRDS(object = glm_final_fit_3Y_NO_crc,file = "Updated new model/model_3Y_NO_crc")
+
+
+
+############################UPDATE BAZA LUCRU ################################
 baza_lucru_2010_2021 <- baza_updated %>% dplyr::mutate( woe_1Y_categorie_contaminata =
       ifelse( categorie_contaminata == "standard",  0.373,  
               ifelse( categorie_contaminata == "instiintare_neplata",  -2.48, NA_real_)  ),
