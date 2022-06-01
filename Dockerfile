@@ -14,7 +14,7 @@ RUN Rscript -e 'remotes::install_version("glmnet",upgrade="never", version = "4.
 RUN Rscript -e 'remotes::install_version("embed",upgrade="never", version = "0.1.5")'
 RUN Rscript -e 'remotes::install_version("broom",upgrade="never", version = "0.7.10")'
 RUN mkdir /build_zone
-ADD . /build_zone
+ADD 'new_model_development.R' /build_zone
 WORKDIR /build_zone
 #RUN R -e 'remotes::install_local(upgrade="never")'
-RUN rm -rf /build_zone
+#RUN rm -rf /build_zone
